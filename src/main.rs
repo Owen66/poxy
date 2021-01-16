@@ -5,7 +5,7 @@ use async_std::task::block_on;
 use futures::stream::StreamExt;
 use futures::{AsyncReadExt, AsyncWriteExt};
 use std::convert::TryInto;
-use std::io;
+use async_std::io::copy;
 use async_std::io::Error;
 
 fn main() {
@@ -44,35 +44,16 @@ async fn handle_connection(mut stream: TcpStream) -> Result<(), Error> {
     let (mut ir , mut iw) = stream.split();
     let (mut or , mut ow) = other_stream.split();
 
-    // Upload
-    spawn(async move {
-        let mut buf = [0_u8; 1024];
-        loop {
-            let n = match ir.read(&mut buf[..]).await {
-                Err(e) => break e,
-                Ok(0) => break io::Error::from_raw_os_error(22),
-                Ok(n) => n,
-            };
-
-            if let Err(e) = ow.write(&mut buf[..n]).await {
-                break e;
-            }
-        }
-    });
-
     // Download
     spawn(async move {
-        let mut buf = [0_u8; 1024];
-        loop {
-            let n = match or.read(&mut buf[..]).await {
-                Err(e) => break e,
-                Ok(n) => n,
-            };
-            if let Err(e) = iw.write(&mut buf[..n]).await {
-                break e.into();
-            }
-        }
+        copy(&mut or, &mut iw).await.unwrap();
     });
+
+    // Upload
+    spawn(async move {
+        copy(&mut ir, &mut ow).await.unwrap();
+    });
+
     Ok(())
 }
 
